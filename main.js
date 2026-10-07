@@ -1,144 +1,161 @@
 (() => {
-  const $ = (s, r = document) => r.querySelector(s);
-  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-  const fine = matchMedia('(hover:hover) and (pointer:fine)').matches;
-  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const d = document, root = d.documentElement;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const mobile = matchMedia('(max-width: 767px)');
 
-  // nav: pozadí po odscrollování
-  const nav = $('#nav');
-  const onScroll = () => nav.classList.toggle('solid', scrollY > 40);
-  addEventListener('scroll', onScroll, { passive: true });
-  onScroll();
-
-  // mobilní menu
-  const burger = $('.burger'), mmenu = $('#mmenu');
-  const setMenu = open => {
-    burger.setAttribute('aria-expanded', open);
-    mmenu.hidden = !open;
-    document.body.style.overflow = open ? 'hidden' : '';
-  };
-  burger.addEventListener('click', () => setMenu(burger.getAttribute('aria-expanded') !== 'true'));
-  $$('a', mmenu).forEach(a => a.addEventListener('click', () => setMenu(false)));
-  addEventListener('keydown', e => { if (e.key === 'Escape') setMenu(false); });
-
-  // reveal
-  const io = new IntersectionObserver(entries => {
-    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
-  }, { rootMargin: '0px 0px -10% 0px', threshold: 0.08 });
-  $$('.rv, .rv-clip').forEach(el => io.observe(el));
-
-  // hero: timecode podle videa, jen když je hero vidět
-  const hv = $('.hero-video'), tc = $('#tc');
-  if (hv && tc) {
-    let timer = null;
-    const pad = n => String(n).padStart(2, '0');
-    const tick = () => {
-      const t = hv.currentTime || 0;
-      tc.textContent = `00:${pad(Math.floor(t / 60))}:${pad(Math.floor(t % 60))}:${pad(Math.floor((t % 1) * 24))}`;
-    };
-    new IntersectionObserver(([e]) => {
-      if (e.isIntersecting) { if (!timer) timer = setInterval(tick, 1000 / 12); hv.play().catch(() => {}); }
-      else { clearInterval(timer); timer = null; hv.pause(); }
-    }).observe($('.hero'));
-    if (reduced) hv.pause();
-  }
-
-  // porovnání HDR
-  const cmp = $('#compare');
-  if (cmp) {
-    const range = $('.cmp-range', cmp);
-    const set = v => cmp.style.setProperty('--pos', v + '%');
-    range.addEventListener('input', () => set(range.value));
-    // jemná nápověda: jezdec se jednou pohne, když sekce dojede do pohledu
-    if (!reduced) {
-      const hint = new IntersectionObserver(([e]) => {
-        if (!e.isIntersecting) return;
-        hint.disconnect();
-        const seq = [50, 30, 70, 50]; let i = 0;
-        const step = () => {
-          if (i >= seq.length - 1 || cmp.dataset.touched) return;
-          const from = seq[i], to = seq[i + 1], t0 = performance.now(), d = 900;
-          const anim = now => {
-            if (cmp.dataset.touched) return;
-            const p = Math.min(1, (now - t0) / d), k = p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
-            const v = from + (to - from) * k; set(v); range.value = v;
-            if (p < 1) requestAnimationFrame(anim); else { i++; step(); }
-          };
-          requestAnimationFrame(anim);
-        };
-        setTimeout(step, 900);
-      }, { threshold: .6 });
-      hint.observe(cmp);
-      range.addEventListener('pointerdown', () => cmp.dataset.touched = 1, { once: true });
+  /* hero video: mobil dostane vlastní výřez na výšku */
+  const hv = d.querySelector('.hero-video');
+  if (hv) {
+    if (mobile.matches) {
+      hv.poster = hv.dataset.posterM;
+      hv.innerHTML = `<source src="${hv.dataset.srcM}" type="video/mp4">`;
+    } else {
+      hv.innerHTML = `<source src="${hv.dataset.srcDw}" type="video/webm"><source src="${hv.dataset.srcD}" type="video/mp4">`;
     }
+    hv.load();
+    if (reduce) hv.removeAttribute('autoplay');
+    else hv.play().catch(() => {});
   }
 
-  // dron – přepínání ukázek
-  const tabs = $$('.drone-tabs button'), dImgs = $$('.drone-frame img');
-  tabs.forEach(b => b.addEventListener('click', () => {
-    tabs.forEach(t => t.setAttribute('aria-selected', t === b));
-    dImgs.forEach((im, i) => im.classList.toggle('on', i === +b.dataset.i));
+  /* počáteční zmenšení hero videa = šířka obsahu / šířka okna */
+  const setS0 = () => {
+    const g = parseFloat(getComputedStyle(d.querySelector('.wrap')).paddingLeft) || 0;
+    const w = root.clientWidth;
+    const cw = Math.min(w, 1440) - 2 * g;
+    root.style.setProperty('--s0', (cw / w).toFixed(4));
+  };
+  setS0();
+  addEventListener('resize', setS0, { passive: true });
+
+  /* nav pozadí po odscrollování (sentinel místo scroll listeneru) */
+  const nav = d.getElementById('nav');
+  const sentinel = d.createElement('div');
+  sentinel.style.cssText = 'position:absolute;top:0;left:0;height:24px;width:1px;pointer-events:none';
+  d.body.prepend(sentinel);
+  new IntersectionObserver(([e]) => nav.classList.toggle('is-solid', !e.isIntersecting)).observe(sentinel);
+
+  /* reveal */
+  const io = new IntersectionObserver((es) => {
+    es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+  }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
+  d.querySelectorAll('[data-r], .rv').forEach((el) => io.observe(el));
+
+  /* mobilní menu */
+  const burger = d.querySelector('.burger'), mm = d.getElementById('mmenu');
+  const setMenu = (open) => {
+    root.classList.toggle('menu-open', open);
+    burger.setAttribute('aria-expanded', open);
+    mm.setAttribute('aria-hidden', !open);
+  };
+  burger.addEventListener('click', () => setMenu(!root.classList.contains('menu-open')));
+  mm.querySelectorAll('a').forEach((a) => a.addEventListener('click', () => setMenu(false)));
+
+  /* dron: přepínání snímků */
+  const tabs = d.querySelectorAll('.drone-tabs [role=tab]');
+  const dimgs = d.querySelectorAll('.drone-zoom img');
+  tabs.forEach((t, i) => t.addEventListener('click', () => {
+    tabs.forEach((x, j) => x.setAttribute('aria-selected', i === j));
+    dimgs.forEach((im, j) => im.classList.toggle('is-on', i === j));
   }));
 
-  // video ukázka
-  const player = $('#player');
-  if (player) {
-    const v = $('video', player), btn = $('.play', player);
-    v.removeAttribute('controls');
-    btn.addEventListener('click', () => { v.setAttribute('controls', ''); v.play(); player.classList.add('playing'); });
-    v.addEventListener('pause', () => { if (v.currentTime < .2) player.classList.remove('playing'); });
-    v.addEventListener('ended', () => { player.classList.remove('playing'); v.removeAttribute('controls'); v.currentTime = 0; });
-  }
+  /* videoprohlídka */
+  const player = d.querySelector('.player'), tour = d.getElementById('tour');
+  const playTour = () => {
+    player.classList.add('is-playing');
+    tour.controls = true;
+    tour.play().catch(() => {});
+  };
+  d.querySelector('.player-cover').addEventListener('click', playTour);
+  d.querySelector('[data-play-tour]').addEventListener('click', (e) => {
+    e.preventDefault();
+    playTour();
+    player.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'center' });
+  });
 
-  // galerie – lightbox
-  const lb = $('#lightbox');
-  if (lb && lb.showModal) {
-    const lbImg = $('img', lb);
-    $$('.g button').forEach(b => b.addEventListener('click', () => {
-      lbImg.src = b.dataset.full; lbImg.alt = $('img', b).alt; lb.showModal();
-    }));
-    lb.addEventListener('click', e => { if (e.target !== lbImg) lb.close(); });
-  }
+  /* lightbox se zoomem */
+  const lb = d.getElementById('lb'), lbImg = lb.querySelector('.lb-img'), stage = lb.querySelector('.lb-stage');
+  const work = [...d.querySelectorAll('.grid-work .w img')].map((im) => ({
+    src: im.currentSrc || im.src, big: im.src.replace(/-(800|1400)\.webp/, '-xl.webp'), alt: im.alt,
+  }));
+  let list = work, idx = 0, lastFocus = null;
+  const show = (i) => {
+    idx = (i + list.length) % list.length;
+    lb.classList.remove('is-zoom');
+    lbImg.src = list[idx].big;
+    lbImg.alt = list[idx].alt;
+  };
+  const open = (items, i) => {
+    list = items; lastFocus = d.activeElement;
+    lb.classList.toggle('single', items.length < 2);
+    lb.hidden = false;
+    requestAnimationFrame(() => lb.classList.add('is-open'));
+    root.style.overflow = 'hidden';
+    show(i);
+    lb.querySelector('.lb-close').focus({ preventScroll: true });
+  };
+  const close = () => {
+    lb.classList.remove('is-open', 'is-zoom');
+    root.style.overflow = '';
+    setTimeout(() => { lb.hidden = true; lbImg.removeAttribute('src'); }, 400);
+    lastFocus && lastFocus.focus({ preventScroll: true });
+  };
+  const zoom = (ev) => {
+    const on = !lb.classList.contains('is-zoom');
+    const r = lbImg.getBoundingClientRect();
+    const fx = ev && ev.clientX ? (ev.clientX - r.left) / r.width : 0.5;
+    const fy = ev && ev.clientY ? (ev.clientY - r.top) / r.height : 0.5;
+    lb.classList.toggle('is-zoom', on);
+    if (on) {
+      const go = () => {
+        stage.scrollLeft = lbImg.offsetWidth * fx - stage.clientWidth / 2;
+        stage.scrollTop = lbImg.offsetHeight * fy - stage.clientHeight / 2;
+      };
+      lbImg.complete ? requestAnimationFrame(go) : lbImg.addEventListener('load', go, { once: true });
+    }
+  };
+  d.querySelectorAll('.grid-work .w').forEach((b) => b.addEventListener('click', () => open(work, +b.dataset.lb)));
+  d.querySelector('.drone-zoom').addEventListener('click', () => {
+    const im = d.querySelector('.drone-zoom img.is-on');
+    open([{ big: im.dataset.full, alt: im.alt }], 0);
+  });
+  lbImg.addEventListener('click', zoom);
+  lb.querySelector('.lb-zoom').addEventListener('click', () => zoom());
+  lb.querySelector('.lb-close').addEventListener('click', close);
+  lb.querySelector('.lb-prev').addEventListener('click', () => show(idx - 1));
+  lb.querySelector('.lb-next').addEventListener('click', () => show(idx + 1));
+  stage.addEventListener('click', (e) => { if (e.target === stage && !lb.classList.contains('is-zoom')) close(); });
+  d.addEventListener('keydown', (e) => {
+    if (lb.hidden) { if (e.key === 'Escape') setMenu(false); return; }
+    if (e.key === 'Escape') close();
+    if (e.key === 'ArrowLeft') show(idx - 1);
+    if (e.key === 'ArrowRight') show(idx + 1);
+  });
+  let sx = null;
+  stage.addEventListener('touchstart', (e) => { sx = lb.classList.contains('is-zoom') ? null : e.touches[0].clientX; }, { passive: true });
+  stage.addEventListener('touchend', (e) => {
+    if (sx === null || list.length < 2) return;
+    const dx = e.changedTouches[0].clientX - sx;
+    if (Math.abs(dx) > 50) show(idx + (dx < 0 ? 1 : -1));
+    sx = null;
+  });
 
-  // ceník – náhled fotky u kurzoru
-  const prev = $('.price-preview');
-  if (prev && fine) {
-    const pImg = $('img', prev);
-    let x = 0, y = 0, raf = 0;
-    const move = () => { prev.style.left = (x + 170) + 'px'; prev.style.top = y + 'px'; raf = 0; };
-    $$('.price-row[data-img]').forEach(r => {
-      r.addEventListener('pointerenter', () => { pImg.src = r.dataset.img; prev.classList.add('on'); });
-      r.addEventListener('pointerleave', () => prev.classList.remove('on'));
-      r.addEventListener('pointermove', e => { x = e.clientX; y = e.clientY; if (!raf) raf = requestAnimationFrame(move); });
-    });
-  }
+  /* balíček z ceníku předvyplní služby */
+  d.querySelectorAll('[data-service="komplet"]').forEach((a) => a.addEventListener('click', () => {
+    const c = d.querySelector('[data-svc="komplet"]'); if (c) c.checked = true;
+  }));
 
-  // magnetická tlačítka
-  if (fine && !reduced) {
-    $$('.magnetic').forEach(b => {
-      b.addEventListener('pointermove', e => {
-        const r = b.getBoundingClientRect();
-        b.style.setProperty('--bx', ((e.clientX - r.left - r.width / 2) * .18) + 'px');
-        b.style.setProperty('--by', ((e.clientY - r.top - r.height / 2) * .28) + 'px');
-      });
-      b.addEventListener('pointerleave', () => { b.style.setProperty('--bx', '0px'); b.style.setProperty('--by', '0px'); });
-    });
-  }
-
-  // balíček předvybere službu ve formuláři
-  $$('[data-pick="balicek"]').forEach(a => a.addEventListener('click', () => { const c = $('#pick-balicek'); if (c) c.checked = true; }));
-
-  // poptávkový formulář (náhled – odesílání se napojí po doplnění kontaktu)
-  const form = $('#form'), note = $('#form-note');
-  if (form) form.addEventListener('submit', e => {
+  /* formulář: validace, odesílání se zapne po doplnění kontaktu */
+  const form = d.getElementById('form'), msg = form.querySelector('.form-msg');
+  form.addEventListener('submit', (e) => {
     e.preventDefault();
     let ok = true;
-    $$('[required]', form).forEach(i => {
-      const bad = !i.value.trim() || (i.type === 'email' && !/^\S+@\S+\.\S+$/.test(i.value));
-      i.closest('.f').classList.toggle('err', bad); if (bad) ok = false;
-    });
-    if (!ok) { note.textContent = 'Vyplňte prosím jméno, e-mail a lokalitu.'; return; }
-    note.textContent = 'Děkuji! Formulář je zatím v náhledu – po spuštění webu bude poptávka chodit rovnou ke mně.';
-    form.reset();
+    const name = form.jmeno, mail = form.email;
+    name.closest('.fld').classList.toggle('bad', !name.value.trim());
+    mail.closest('.fld').classList.toggle('bad', !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail.value.trim()));
+    if (!name.value.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail.value.trim())) ok = false;
+    if (!ok) { msg.className = 'form-msg'; msg.textContent = 'Zkontrolujte prosím zvýrazněná pole.'; return; }
+    msg.className = 'form-msg ok';
+    msg.textContent = 'Náhled webu: odesílání poptávek zapneme po doplnění kontaktu.';
   });
+  form.addEventListener('input', (e) => { const f = e.target.closest('.fld'); if (f) f.classList.remove('bad'); });
 })();
